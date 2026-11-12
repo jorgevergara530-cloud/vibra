@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- El ícono de notificación se pide por nombre desde Dart; evita que el
+     reductor de recursos de la build release lo elimine. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_vibra" />

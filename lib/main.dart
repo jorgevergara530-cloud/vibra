@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 
 // Crea tu client_id gratis en https://devportal.jamendo.com
 // Se inyecta al compilar: --dart-define=JAMENDO_CLIENT_ID=xxxx
@@ -57,55 +58,79 @@ class PlayerController extends ChangeNotifier {
       index >= 0 && index < queue.length ? queue[index] : null;
 
   PlayerController() {
-    player.playerStateStream.listen((s) {
-      if (s.processingState == ProcessingState.completed) next();
-      notifyListeners();
+    player.playerStateStream.listen((_) => notifyListeners());
+    // La cola la maneja just_audio (avanza sola y también desde la
+    // notificación / pantalla de bloqueo); aquí solo seguimos el índice.
+    player.currentIndexStream.listen((i) {
+      if (i != null && i != index) {
+        index = i;
+        notifyListeners();
+      }
     });
   }
+
+  static AudioSource _source(Track t) => AudioSource.uri(
+        Uri.parse(t.audio),
+        tag: MediaItem(
+          id: t.id,
+          title: t.name,
+          artist: t.artist,
+          artUri: t.image.isEmpty ? null : Uri.parse(t.image),
+        ),
+      );
 
   Future<void> playList(List<Track> list, int i) async {
     queue = list;
     index = i;
     notifyListeners();
-    await _load();
-  }
-
-  Future<void> _load() async {
-    final t = current;
-    if (t == null) return;
     try {
-      await player.setUrl(t.audio);
+      await player.setAudioSources(list.map(_source).toList(),
+          initialIndex: i);
       player.play();
     } catch (e) {
       debugPrint('Error al reproducir: $e');
     }
-    notifyListeners();
   }
 
-  Future<void> next() async {
-    if (index < queue.length - 1) {
-      index++;
-      await _load();
-    }
-  }
+  Future<void> next() => player.seekToNext();
 
   Future<void> prev() async {
-    if (player.position.inSeconds > 3) {
-      player.seek(Duration.zero);
-    } else if (index > 0) {
-      index--;
-      await _load();
+    if (player.position.inSeconds > 3 || !player.hasPrevious) {
+      await player.seek(Duration.zero);
+    } else {
+      await player.seekToPrevious();
     }
   }
 
-  void toggle() => player.playing ? player.pause() : player.play();
+  void toggle() {
+    if (player.playing) {
+      player.pause();
+    } else {
+      // Si la lista terminó, vuelve a empezar la canción actual.
+      if (player.processingState == ProcessingState.completed) {
+        player.seek(Duration.zero, index: player.currentIndex);
+      }
+      player.play();
+    }
+  }
 }
 
 final pc = PlayerController();
 
 // ---------------- App ----------------
 
-void main() => runApp(const MusicApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Notificación multimedia + controles en pantalla de bloqueo.
+  // Debe ejecutarse antes de crear el AudioPlayer (pc se crea al primer uso).
+  await JustAudioBackground.init(
+    androidNotificationChannelId: 'com.vibra.vibra.channel.audio',
+    androidNotificationChannelName: 'Reproducción de música',
+    androidNotificationOngoing: true,
+    androidNotificationIcon: 'drawable/ic_stat_vibra',
+  );
+  runApp(const MusicApp());
+}
 
 class MusicApp extends StatelessWidget {
   const MusicApp({super.key});

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vibra: ecualizador de 5 barras (zona segura 66dp centrada en 108dp) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:pathData="M28,47L28,61 M41,38L41,70 M54,31L54,77 M67,41L67,67 M80,48L80,60" />
+</vector>
