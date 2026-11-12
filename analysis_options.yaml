@@ -1,0 +1,4 @@
+# Sin flutter_lints (no está en pubspec.yaml); evita avisos de include faltante.
+analyzer:
+  errors:
+    unused_import: warning

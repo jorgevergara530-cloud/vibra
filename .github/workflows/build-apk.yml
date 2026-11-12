@@ -1,0 +1,53 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Verificar secreto JAMENDO_CLIENT_ID
+        env:
+          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
+        run: |
+          if [ -z "$JAMENDO_CLIENT_ID" ]; then
+            echo "::error::Falta el secreto JAMENDO_CLIENT_ID (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+
+      # Genera solo los archivos de plataforma que falten (Gradle, MainActivity, íconos).
+      # No sobrescribe lib/main.dart, pubspec.yaml ni AndroidManifest.xml.
+      - name: flutter create (archivos faltantes)
+        run: |
+          flutter create --project-name vibra --org com.vibra --platforms android .
+          rm -f test/widget_test.dart
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter build apk
+        run: flutter build apk --release --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibra-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
