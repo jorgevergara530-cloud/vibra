@@ -1,7 +1,7 @@
-name: vibra
-description: App de música estilo Spotify con la API de Jamendo
+﻿name: vibra
+description: App de mÃºsica estilo Spotify con la API de Jamendo
 publish_to: 'none'
-version: 1.2.0+3
+version: 1.2.1+4
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

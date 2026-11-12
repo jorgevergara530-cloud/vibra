@@ -69,8 +69,36 @@ class LocalMusic {
 }
 
 class Api {
+  // Secciones de Inicio ya cargadas (evita volver a pedirlas al hacer scroll).
+  static final _sections = <String, Future<List<Track>>>{};
+
+  static Future<List<Track>> section(String? tag) {
+    final key = tag ?? '';
+    return _sections.putIfAbsent(key, () async {
+      try {
+        final list = await tracks(tag: tag);
+        if (list.isEmpty) _sections.remove(key); // permitir reintentar
+        return list;
+      } catch (_) {
+        _sections.remove(key);
+        rethrow;
+      }
+    });
+  }
+
+  // Jamendo a veces responde "success" con 0 resultados de forma
+  // intermitente; reintentamos antes de darlo por vacío.
   static Future<List<Track>> tracks(
       {String? search, String? tag, int limit = 20}) async {
+    for (var attempt = 0;; attempt++) {
+      final list = await _fetch(search: search, tag: tag, limit: limit);
+      if (list.isNotEmpty || attempt >= 2) return list;
+      await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+    }
+  }
+
+  static Future<List<Track>> _fetch(
+      {String? search, String? tag, required int limit}) async {
     final params = {
       'client_id': kClientId,
       'format': 'json',
@@ -82,7 +110,7 @@ class Api {
       if (tag != null) 'tags': tag,
     };
     final uri = Uri.https('api.jamendo.com', '/v3.0/tracks/', params);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) throw Exception('Error ${res.statusCode}');
     final data = jsonDecode(res.body);
     return (data['results'] as List)
@@ -305,7 +333,9 @@ class Section extends StatefulWidget {
 }
 
 class _SectionState extends State<Section> {
-  late final Future<List<Track>> future = Api.tracks(tag: widget.tag);
+  late Future<List<Track>> future = Api.section(widget.tag);
+
+  void _retry() => setState(() => future = Api.section(widget.tag));
 
   @override
   Widget build(BuildContext context) {
@@ -327,8 +357,22 @@ class _SectionState extends State<Section> {
                 return const Center(
                     child: CircularProgressIndicator(color: kGreen));
               }
-              if (s.hasError || s.data == null) {
-                return const Center(child: Text('No se pudo cargar'));
+              if (s.hasError || s.data == null || s.data!.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('No se pudo cargar',
+                          style: TextStyle(color: Colors.grey)),
+                      TextButton.icon(
+                        onPressed: _retry,
+                        icon: const Icon(Icons.refresh, color: kGreen),
+                        label: const Text('Reintentar',
+                            style: TextStyle(color: kGreen)),
+                      ),
+                    ],
+                  ),
+                );
               }
               final list = s.data!;
               return ListView.separated(
