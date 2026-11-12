@@ -50,7 +50,9 @@ jobs:
             exit 1
           fi
           mkdir -p ~/.android
-          echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+          # Limpia saltos de línea de Windows u otros caracteres no base64
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=' | base64 -d > ~/.android/debug.keystore
+          keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey | grep -i "SHA-256"
 
       - name: flutter pub get
         run: flutter pub get
