@@ -46,7 +46,7 @@ jobs:
         run: flutter build apk --release --dart-define=JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}
 
       - name: Subir APK
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: vibra-apk
           path: build/app/outputs/flutter-apk/app-release.apk
