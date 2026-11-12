@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -15,12 +17,55 @@ const kGreen = Color(0xFF1DB954);
 
 class Track {
   final String id, name, artist, image, audio;
+  final bool isLocal; // true = archivo guardado en el celular
+
   Track.fromJson(Map<String, dynamic> j)
       : id = j['id'].toString(),
         name = j['name'] ?? '',
         artist = j['artist_name'] ?? '',
         image = j['image'] ?? '',
-        audio = j['audio'] ?? '';
+        audio = j['audio'] ?? '',
+        isLocal = false;
+
+  Track.local(Map m)
+      : id = '${m['id']}',
+        name = '${m['title']}',
+        artist = '${m['artist']}',
+        image = '${m['art']}',
+        audio = '${m['uri']}',
+        isLocal = true;
+}
+
+// ---------------- Música del celular (canal nativo, ver MainActivity.kt) ----------------
+
+class LocalMusic {
+  static const _ch = MethodChannel('vibra/local_music');
+  static final _artFutures = <String, Future<Uint8List?>>{};
+  static final _artCache = <String, Uint8List?>{};
+
+  static Future<bool> hasPermission() async =>
+      await _ch.invokeMethod<bool>('hasPermission') ?? false;
+
+  static Future<bool> requestPermission() async =>
+      await _ch.invokeMethod<bool>('requestPermission') ?? false;
+
+  static Future<void> openSettings() => _ch.invokeMethod('openSettings');
+
+  static Future<List<Track>> songs() async {
+    final list = await _ch.invokeListMethod<Map>('getSongs') ?? const [];
+    return list.map(Track.local).toList();
+  }
+
+  static Uint8List? cachedArt(String id) => _artCache[id];
+
+  static Future<Uint8List?> art(String id) => _artFutures.putIfAbsent(id, () async {
+        try {
+          final b = await _ch.invokeMethod<Uint8List>('getArt', {'id': id});
+          return _artCache[id] = b;
+        } catch (_) {
+          return _artCache[id] = null;
+        }
+      });
 }
 
 class Api {
@@ -72,7 +117,7 @@ class PlayerController extends ChangeNotifier {
   static AudioSource _source(Track t) => AudioSource.uri(
         Uri.parse(t.audio),
         tag: MediaItem(
-          id: t.id,
+          id: t.audio,
           title: t.name,
           artist: t.artist,
           artUri: t.image.isEmpty ? null : Uri.parse(t.image),
@@ -151,20 +196,34 @@ class MusicApp extends StatelessWidget {
       );
 }
 
-Widget cover(String url, double size) => ClipRRect(
+Widget _artPlaceholder(double size) => Container(
+      width: size,
+      height: size,
+      color: Colors.grey[850],
+      child: Icon(Icons.music_note, size: size * 0.4, color: Colors.white54),
+    );
+
+Widget cover(Track t, double size) => ClipRRect(
       borderRadius: BorderRadius.circular(6),
-      child: CachedNetworkImage(
-        imageUrl: url,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorWidget: (_, __, ___) => Container(
-          width: size,
-          height: size,
-          color: Colors.grey[850],
-          child: const Icon(Icons.music_note),
-        ),
-      ),
+      child: t.isLocal
+          ? FutureBuilder<Uint8List?>(
+              future: LocalMusic.art(t.id),
+              initialData: LocalMusic.cachedArt(t.id),
+              builder: (_, s) => s.data == null
+                  ? _artPlaceholder(size)
+                  : Image.memory(s.data!,
+                      width: size,
+                      height: size,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true),
+            )
+          : CachedNetworkImage(
+              imageUrl: t.image,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              errorWidget: (_, __, ___) => _artPlaceholder(size),
+            ),
     );
 
 class Shell extends StatefulWidget {
@@ -181,7 +240,7 @@ class _ShellState extends State<Shell> {
         body: SafeArea(
           child: IndexedStack(
             index: tab,
-            children: const [HomePage(), SearchPage()],
+            children: const [HomePage(), SearchPage(), LibraryPage()],
           ),
         ),
         bottomNavigationBar: Column(
@@ -198,6 +257,10 @@ class _ShellState extends State<Shell> {
                     label: 'Inicio'),
                 NavigationDestination(
                     icon: Icon(Icons.search), label: 'Buscar'),
+                NavigationDestination(
+                    icon: Icon(Icons.library_music_outlined),
+                    selectedIcon: Icon(Icons.library_music),
+                    label: 'Mis canciones'),
               ],
             ),
           ],
@@ -220,6 +283,10 @@ class HomePage extends StatelessWidget {
                 style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
           ),
           Section(title: 'Populares esta semana'),
+          Section(title: 'Reggaetón', tag: 'reggaeton'),
+          Section(title: 'Trap', tag: 'trap'),
+          Section(title: 'Urbano', tag: 'urban'),
+          Section(title: 'Dancehall', tag: 'dancehall'),
           Section(title: 'Rock', tag: 'rock'),
           Section(title: 'Pop', tag: 'pop'),
           Section(title: 'Electrónica', tag: 'electronic'),
@@ -276,7 +343,7 @@ class _SectionState extends State<Section> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        cover(list[i].image, 130),
+                        cover(list[i], 130),
                         const SizedBox(height: 6),
                         Text(list[i].name,
                             maxLines: 1,
@@ -358,7 +425,7 @@ class _SearchPageState extends State<SearchPage> {
                       return ListView.builder(
                         itemCount: list.length,
                         itemBuilder: (_, i) => ListTile(
-                          leading: cover(list[i].image, 50),
+                          leading: cover(list[i], 50),
                           title: Text(list[i].name,
                               maxLines: 1, overflow: TextOverflow.ellipsis),
                           subtitle: Text(list[i].artist,
@@ -371,6 +438,210 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ],
       );
+}
+
+// ---------------- Mis canciones (música del celular) ----------------
+
+class LibraryPage extends StatefulWidget {
+  const LibraryPage({super.key});
+  @override
+  State<LibraryPage> createState() => _LibraryPageState();
+}
+
+class _LibraryPageState extends State<LibraryPage>
+    with WidgetsBindingObserver {
+  bool? granted; // null = comprobando
+  bool asked = false;
+  List<Track>? songs;
+  String? error;
+  String filter = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _check(); // no pide permiso al abrir la app; solo comprueba
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Al volver de Ajustes, vuelve a comprobar el permiso.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && granted != true) _check();
+  }
+
+  Future<void> _check() async {
+    final ok = await LocalMusic.hasPermission();
+    if (!mounted) return;
+    setState(() => granted = ok);
+    if (ok && songs == null) _load();
+  }
+
+  Future<void> _ask() async {
+    final ok = await LocalMusic.requestPermission();
+    if (!mounted) return;
+    setState(() {
+      granted = ok;
+      asked = true;
+    });
+    if (ok) _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final s = await LocalMusic.songs();
+      if (mounted) {
+        setState(() {
+          songs = s;
+          error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    }
+  }
+
+  Widget _message(IconData icon, String text, List<Widget> actions) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 64, color: Colors.white38),
+              const SizedBox(height: 16),
+              Text(text,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16)),
+              const SizedBox(height: 20),
+              ...actions,
+            ],
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    if (granted == null) {
+      return const Center(child: CircularProgressIndicator(color: kGreen));
+    }
+    if (granted == false) {
+      return _message(
+        Icons.library_music,
+        'Escucha la música que tienes guardada en tu celular',
+        [
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: kGreen, foregroundColor: Colors.black),
+            onPressed: _ask,
+            child: const Text('Permitir acceso a mi música'),
+          ),
+          if (asked)
+            TextButton(
+              onPressed: LocalMusic.openSettings,
+              child: const Text('Abrir ajustes de la app'),
+            ),
+        ],
+      );
+    }
+    if (error != null) {
+      return _message(Icons.error_outline, 'No se pudo leer tu música',
+          [TextButton(onPressed: _load, child: const Text('Reintentar'))]);
+    }
+    final all = songs;
+    if (all == null) {
+      return const Center(child: CircularProgressIndicator(color: kGreen));
+    }
+    if (all.isEmpty) {
+      return _message(Icons.music_off, 'No encontramos canciones en tu celular',
+          [TextButton(onPressed: _load, child: const Text('Buscar de nuevo'))]);
+    }
+
+    final q = filter.toLowerCase();
+    final list = q.isEmpty
+        ? all
+        : all
+            .where((t) =>
+                t.name.toLowerCase().contains(q) ||
+                t.artist.toLowerCase().contains(q))
+            .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 8, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Mis canciones',
+                        style: TextStyle(
+                            fontSize: 26, fontWeight: FontWeight.bold)),
+                    Text('${all.length} canciones',
+                        style: const TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Aleatorio',
+                icon: const Icon(Icons.shuffle),
+                onPressed: () => pc.playList([...list]..shuffle(), 0),
+              ),
+              IconButton.filled(
+                tooltip: 'Reproducir todo',
+                style: IconButton.styleFrom(
+                    backgroundColor: kGreen, foregroundColor: Colors.black),
+                icon: const Icon(Icons.play_arrow),
+                onPressed: () => pc.playList(list, 0),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: TextField(
+            onChanged: (v) => setState(() => filter = v.trim()),
+            decoration: InputDecoration(
+              hintText: 'Filtrar por canción o artista',
+              prefixIcon: const Icon(Icons.filter_list),
+              isDense: true,
+              filled: true,
+              fillColor: Colors.white12,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            color: kGreen,
+            onRefresh: _load,
+            child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: list.length,
+              itemBuilder: (_, i) => ListTile(
+                leading: cover(list[i], 50),
+                title: Text(list[i].name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(list[i].artist,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () => pc.playList(list, i),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // ---------------- Mini player ----------------
@@ -403,7 +674,7 @@ class MiniPlayer extends StatelessWidget {
                 children: [
                   ListTile(
                     dense: true,
-                    leading: cover(t.image, 44),
+                    leading: cover(t, 44),
                     title: Text(t.name,
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(t.artist,
@@ -462,7 +733,7 @@ class FullPlayer extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                cover(t.image, side),
+                cover(t, side),
                 const SizedBox(height: 24),
                 Align(
                   alignment: Alignment.centerLeft,
