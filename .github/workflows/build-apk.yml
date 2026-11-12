@@ -39,6 +39,19 @@ jobs:
           flutter create --project-name vibra --org com.vibra --platforms android .
           rm -f test/widget_test.dart
 
+      # Firma fija: sin esto cada build usa una clave distinta y Android no
+      # deja actualizar la app encima de la versión anterior.
+      - name: Clave de firma fija
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "::error::Falta el secreto DEBUG_KEYSTORE_BASE64"
+            exit 1
+          fi
+          mkdir -p ~/.android
+          echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+
       - name: flutter pub get
         run: flutter pub get
 
